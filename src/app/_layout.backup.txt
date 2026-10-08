@@ -1,18 +1,63 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { Stack } from "expo-router";
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import RouteGuard from "../components/RouteGuard";
+import { AuthProvider } from "../contexts/AuthContext";
 
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <AuthProvider>
+      <RouteGuard>
+        <Stack>
+          <Stack.Screen
+            name="index"
+            options={{
+              title: "Marriage Market",
+            }}
+          />
+
+          <Stack.Screen
+            name="(auth)/register"
+            options={{
+              title: "Create Account",
+            }}
+          />
+
+          <Stack.Screen
+            name="(auth)/login"
+            options={{
+              title: "Sign In",
+            }}
+          />
+
+          <Stack.Screen
+            name="complete-profile"
+            options={{
+              title: "Complete Profile",
+            }}
+          />
+
+          <Stack.Screen
+            name="account-pending"
+            options={{
+              title: "Account Pending",
+            }}
+          />
+
+          <Stack.Screen
+            name="account-restricted"
+            options={{
+              title: "Account Restricted",
+            }}
+          />
+
+          <Stack.Screen
+            name="admin/index"
+            options={{
+              title: "Marriage Market Admin",
+            }}
+          />
+        </Stack>
+      </RouteGuard>
+    </AuthProvider>
   );
 }

@@ -1,105 +1,161 @@
-import * as Device from "expo-device";
-import { Platform, StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
+import { useState } from "react";
 
-import { AnimatedIcon } from "@/components/animated-icon";
-import { HintRow } from "@/components/hint-row";
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import { WebBadge } from "@/components/web-badge";
-import { BottomTabInset, MaxContentWidth, Spacing } from "@/constants/theme";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-import { useEffect } from "react";
-import { testSupabaseConnection } from "../../lib/testConnection";
+import { useAuth } from "../contexts/AuthContext";
 
-useEffect(() => {
-  void testSupabaseConnection();
-}, []);
+export default function AdminDashboard() {
+  const { user, isAdmin, loading, signOut } = useAuth();
 
-function getDevMenuHint() {
-  if (Platform.OS === "web") {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+  const [signingOut, setSigningOut] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  async function handleLogout() {
+    if (signingOut) return;
+
+    setSigningOut(true);
+    setErrorMessage("");
+
+    try {
+      await signOut();
+      router.replace("/login");
+    } catch (error) {
+      console.error("Admin logout error:", error);
+      setErrorMessage("Unable to sign out.");
+    } finally {
+      setSigningOut(false);
+    }
   }
-  if (Device.isDevice) {
+
+  if (loading) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={styles.container}>
+        <ActivityIndicator size="large" />
+        <Text>Checking administrator permissions...</Text>
+      </View>
     );
   }
-  const shortcut = Platform.OS === "android" ? "cmd+m (or ctrl+m)" : "cmd+d";
+
+  if (!user || !isAdmin) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.error}>Administrator access required.</Text>
+      </View>
+    );
+  }
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <View style={styles.container}>
+      <Text style={styles.heading}>Marriage Market Admin</Text>
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+      <Text style={styles.subtitle}>Account management dashboard</Text>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <View style={styles.card}>
+        <Text style={styles.label}>Administrator account</Text>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        <Text style={styles.email}>{user.email}</Text>
 
-        {Platform.OS === "web" && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        <Text style={styles.status}>Administrator authorization confirmed</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Account review</Text>
+
+        <Text style={styles.description}>
+          Pending account reviews and approval controls will be added in the
+          next stage.
+        </Text>
+      </View>
+
+      {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+
+      <Pressable
+        style={styles.button}
+        onPress={handleLogout}
+        disabled={signingOut}
+      >
+        <Text style={styles.buttonText}>
+          {signingOut ? "Signing out..." : "Sign out"}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: "100%",
+    maxWidth: 680,
+    alignSelf: "center",
     justifyContent: "center",
-    flexDirection: "row",
+    padding: 24,
+    gap: 18,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
+
+  heading: {
+    fontSize: 30,
+    fontWeight: "700",
+  },
+
+  subtitle: {
+    fontSize: 16,
+    color: "#666",
+  },
+
+  card: {
+    padding: 22,
+    borderRadius: 12,
+    backgroundColor: "#f0f0f0",
+    gap: 12,
+  },
+
+  label: {
+    fontSize: 14,
+    color: "#666",
+  },
+
+  email: {
+    fontSize: 17,
+    fontWeight: "600",
+  },
+
+  status: {
+    color: "#167a42",
+    fontWeight: "600",
+  },
+
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+  },
+
+  description: {
+    color: "#555",
+    lineHeight: 23,
+  },
+
+  error: {
+    color: "#b42318",
+  },
+
+  button: {
+    backgroundColor: "#111",
+    borderRadius: 10,
+    padding: 16,
     alignItems: "center",
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
   },
-  heroSection: {
-    alignItems: "center",
-    justifyContent: "center",
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: "center",
-  },
-  code: {
-    textTransform: "uppercase",
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: "stretch",
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+
+  buttonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 16,
   },
 });
