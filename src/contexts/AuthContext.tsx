@@ -1,11 +1,11 @@
 import type { Session, User } from "@supabase/supabase-js";
 import {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useState,
-    type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
 } from "react";
 
 import { supabase } from "../../lib/supabase";
@@ -147,7 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (
           event === "SIGNED_IN" ||
           event === "INITIAL_SESSION" ||
-          event === "USER_UPDATED"
+          event === "USER_UPDATED" ||
+          event === "TOKEN_REFRESHED"
         ) {
           setLoading(true);
 
