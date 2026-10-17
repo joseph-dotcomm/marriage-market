@@ -1,107 +1,78 @@
-import { router, usePathname } from "expo-router";
-import { useEffect } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { usePathname, useRootNavigationState, useRouter } from "expo-router";
+import { useEffect, useMemo } from "react";
 
 import { useAuth } from "../contexts/AuthContext";
 
-export default function RouteGuard({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RouteGuard() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const navigationState = useRootNavigationState();
+
   const { session, profile, isAdmin, loading, profileError } = useAuth();
 
-  const pathname = usePathname();
+  const destination = useMemo(() => {
+    if (loading || profileError) return null;
 
-  const isPublicRoute = pathname === "/login" || pathname === "/register";
+    const publicRoute = pathname === "/login" || pathname === "/register";
 
-  const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
+    const adminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
 
-  const profileComplete = Boolean(
-    profile?.date_of_birth &&
-    profile?.country_code &&
-    profile?.city?.trim() &&
-    profile?.biography?.trim(),
-  );
-
-  let destination: string | null = null;
-
-  if (!loading && !profileError) {
     if (!session) {
-      if (!isPublicRoute) {
-        destination = "/login";
-      }
-    } else if (!profile) {
-      // Keep access blocked until the profile is available.
-    } else if (
+      return publicRoute ? null : "/login";
+    }
+
+    if (!profile) {
+      return null;
+    }
+
+    if (
       profile.account_status === "suspended" ||
       profile.account_status === "deleted"
     ) {
-      if (pathname !== "/account-restricted") {
-        destination = "/account-restricted";
-      }
-    } else if (isAdmin) {
-      if (!isAdminRoute) {
-        destination = "/admin";
-      }
-    } else if (isAdminRoute) {
-      destination = profileComplete ? "/account-pending" : "/complete-profile";
-    } else if (!profileComplete) {
-      if (pathname !== "/complete-profile") {
-        destination = "/complete-profile";
-      }
-    } else if (profile.account_status === "pending") {
-      if (pathname !== "/account-pending" && pathname !== "/complete-profile") {
-        destination = "/account-pending";
-      }
-    } else if (profile.account_status === "active") {
+      return pathname === "/account-restricted" ? null : "/account-restricted";
+    }
+
+    if (isAdmin) {
+      return adminRoute ? null : "/admin";
+    }
+
+    const profileComplete = Boolean(
+      profile.date_of_birth &&
+      profile.country_code &&
+      profile.city?.trim() &&
+      profile.biography?.trim(),
+    );
+
+    if (!profileComplete) {
+      return pathname === "/complete-profile" ? null : "/complete-profile";
+    }
+
+    if (profile.account_status === "pending") {
+      return pathname === "/account-pending" ? null : "/account-pending";
+    }
+
+    if (profile.account_status === "active") {
       if (
-        isPublicRoute ||
+        publicRoute ||
+        adminRoute ||
         pathname === "/account-pending" ||
+        pathname === "/complete-profile" ||
         pathname === "/account-restricted"
       ) {
-        destination = "/";
+        return "/";
       }
     }
-  }
+
+    return null;
+  }, [loading, profileError, pathname, session, profile, isAdmin]);
 
   useEffect(() => {
-    if (destination) {
+    if (!navigationState?.key || !destination) return;
+
+    if (pathname !== destination) {
       router.replace(destination as any);
     }
-  }, [destination]);
+  }, [navigationState?.key, destination, pathname, router]);
 
-  if (loading || destination || (session && !profile && !profileError)) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text>Checking account permissions...</Text>
-      </View>
-    );
-  }
-
-  if (profileError) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.error}>Unable to verify account access:</Text>
-        <Text>{profileError}</Text>
-      </View>
-    );
-  }
-
-  return <>{children}</>;
+  return null;
 }
-
-const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    padding: 24,
-  },
-  error: {
-    color: "#b42318",
-    fontWeight: "600",
-  },
-});
