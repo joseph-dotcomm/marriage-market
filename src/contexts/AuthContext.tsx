@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -29,6 +30,8 @@ type AuthContextType = {
   isAdmin: boolean;
   loading: boolean;
   profileError: string | null;
+  passwordRecovery: boolean;
+  clearPasswordRecovery: () => void;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -41,6 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+
+  const requestId = useRef(0);
 
   const loadAccount = useCallback(async (userId: string) => {
     const [profileResult, adminResult] = await Promise.all([
@@ -51,7 +57,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         )
         .eq("user_id", userId)
         .single(),
-
       supabase.rpc("is_admin"),
     ]);
 
@@ -64,7 +69,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (adminResult.error) {
-      console.error("Admin verification:", adminResult.error.message);
       setIsAdmin(false);
       setProfileError(
         (previous) => previous ?? "Unable to verify administrator permissions.",
@@ -89,14 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    let requestId = 0;
 
-    async function initialize() {
-      const currentRequest = ++requestId;
+    async function loadSession() {
+      const current = ++requestId.current;
 
       const { data, error } = await supabase.auth.getSession();
 
-      if (!mounted || currentRequest !== requestId) return;
+      if (!mounted || current !== requestId.current) return;
 
       if (error || !data.session) {
         setSession(null);
@@ -109,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: userData, error: userError } =
         await supabase.auth.getUser();
 
-      if (!mounted || currentRequest !== requestId) return;
+      if (!mounted || current !== requestId.current) return;
 
       if (userError || !userData.user) {
         setSession(null);
@@ -122,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session);
       await loadAccount(userData.user.id);
 
-      if (mounted && currentRequest === requestId) {
+      if (mounted && current === requestId.current) {
         setLoading(false);
       }
     }
@@ -131,34 +134,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (event, newSession) => {
         if (!mounted) return;
 
-        const currentRequest = ++requestId;
+        const current = ++requestId.current;
 
         setSession(newSession);
-        setProfile(null);
-        setIsAdmin(false);
         setProfileError(null);
 
+        if (event === "PASSWORD_RECOVERY") {
+          setPasswordRecovery(true);
+        }
+
+        if (event === "SIGNED_OUT") {
+          setPasswordRecovery(false);
+        }
+
         if (!newSession) {
+          setProfile(null);
+          setIsAdmin(false);
           setLoading(false);
           return;
         }
 
-        // Avoid Supabase queries inside the auth callback.
         if (
           event === "SIGNED_IN" ||
           event === "INITIAL_SESSION" ||
+          event === "PASSWORD_RECOVERY" ||
           event === "USER_UPDATED" ||
           event === "TOKEN_REFRESHED"
         ) {
           setLoading(true);
 
+          // Supabase database requests run outside the auth callback.
           setTimeout(async () => {
-            if (!mounted || currentRequest !== requestId) return;
+            if (!mounted || current !== requestId.current) return;
 
-            await loadAccount(newSession.user.id);
-
-            if (mounted && currentRequest === requestId) {
-              setLoading(false);
+            try {
+              await loadAccount(newSession.user.id);
+            } catch (err) {
+              setProfileError(
+                err instanceof Error ? err.message : "Unable to load account.",
+              );
+            } finally {
+              if (mounted && current === requestId.current) {
+                setLoading(false);
+              }
             }
           }, 0);
         } else {
@@ -167,14 +185,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     );
 
-    initialize();
+    void loadSession();
 
     return () => {
       mounted = false;
-      requestId++;
+      requestId.current++;
       listener.subscription.unsubscribe();
     };
   }, [loadAccount]);
+
+  const clearPasswordRecovery = useCallback(() => {
+    setPasswordRecovery(false);
+  }, []);
 
   async function signOut() {
     const { error } = await supabase.auth.signOut();
@@ -184,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setProfile(null);
     setIsAdmin(false);
+    setPasswordRecovery(false);
   }
 
   return (
@@ -195,6 +218,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAdmin,
         loading,
         profileError,
+        passwordRecovery,
+        clearPasswordRecovery,
         refreshProfile,
         signOut,
       }}

@@ -2,7 +2,6 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,6 +24,13 @@ type PendingAccount = {
 
 type ReviewStatus = "active" | "suspended";
 
+type Confirmation = {
+  accountId: string;
+  accountName: string;
+  status: ReviewStatus;
+  reason: string;
+};
+
 export default function AdminDashboard() {
   const router = useRouter();
 
@@ -33,12 +39,13 @@ export default function AdminDashboard() {
   const [accounts, setAccounts] = useState<PendingAccount[]>([]);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [processing, setProcessing] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
 
-  // Load pending applications from Supabase.
+  // Retrieve pending applications.
   const loadPendingAccounts = useCallback(async () => {
     if (!user || !isAdmin) return;
 
@@ -50,9 +57,7 @@ export default function AdminDashboard() {
         "get_pending_accounts",
       );
 
-      if (rpcError) {
-        throw rpcError;
-      }
+      if (rpcError) throw rpcError;
 
       setAccounts((data ?? []) as PendingAccount[]);
     } catch (err) {
@@ -66,26 +71,49 @@ export default function AdminDashboard() {
     }
   }, [user?.id, isAdmin]);
 
-  // Load applications when administrator access is confirmed.
+  // Load applications after administrator verification.
   useEffect(() => {
     if (user && isAdmin && !loading && !profileError) {
       void loadPendingAccounts();
     }
   }, [user?.id, isAdmin, loading, profileError, loadPendingAccounts]);
 
-  // Approve or suspend an applicant.
-  async function reviewAccount(accountId: string, status: ReviewStatus) {
-    if (processing || !user || !isAdmin) return;
+  // Prepare a decision without changing the database.
+  function prepareReview(account: PendingAccount, status: ReviewStatus) {
+    if (!user || !isAdmin || processing) return;
 
-    // Prevent administrator self-review.
-    if (accountId === user.id) {
+    if (account.user_id === user.id) {
       setError("Administrators cannot review their own accounts.");
       return;
     }
 
-    // Require a reason for every decision.
-    if (!reason.trim()) {
+    const trimmedReason = reason.trim();
+
+    if (!trimmedReason) {
       setError("Please provide a reason for your decision.");
+      return;
+    }
+
+    setError(null);
+    setNotice("");
+
+    setConfirmation({
+      accountId: account.user_id,
+      accountName: account.display_name || "Unnamed applicant",
+      status,
+      reason: trimmedReason,
+    });
+  }
+
+  // Execute the confirmed decision.
+  async function submitReview() {
+    if (!confirmation || processing || !user || !isAdmin) return;
+
+    const decision = confirmation;
+
+    if (decision.accountId === user.id) {
+      setError("Administrators cannot review their own accounts.");
+      setConfirmation(null);
       return;
     }
 
@@ -95,23 +123,22 @@ export default function AdminDashboard() {
 
     try {
       const { error: rpcError } = await supabase.rpc("review_user_account", {
-        target_user: accountId,
-        new_account_status: status,
-        review_reason: reason.trim(),
+        target_user: decision.accountId,
+        new_account_status: decision.status,
+        review_reason: decision.reason,
       });
 
-      if (rpcError) {
-        throw rpcError;
-      }
+      if (rpcError) throw rpcError;
+
+      setConfirmation(null);
+      setSelectedUser(null);
+      setReason("");
 
       setNotice(
-        status === "active"
+        decision.status === "active"
           ? "Account approved successfully."
           : "Account suspended successfully.",
       );
-
-      setSelectedUser(null);
-      setReason("");
 
       await loadPendingAccounts();
     } catch (err) {
@@ -121,36 +148,9 @@ export default function AdminDashboard() {
     }
   }
 
-  // Ask for confirmation before changing account status.
-  function confirmReview(accountId: string, status: ReviewStatus) {
-    if (!reason.trim()) {
-      setError("Please provide a reason for your decision.");
-      return;
-    }
-
-    const action = status === "active" ? "approve" : "suspend";
-
-    Alert.alert(
-      "Confirm Account Review",
-      `Are you sure you want to ${action} this account?`,
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Confirm",
-          style: status === "suspended" ? "destructive" : "default",
-          onPress: () => {
-            void reviewAccount(accountId, status);
-          },
-        },
-      ],
-    );
-  }
-
-  // Sign out administrator.
   async function handleSignOut() {
+    if (processing) return;
+
     try {
       await signOut();
       router.replace("/login");
@@ -159,7 +159,6 @@ export default function AdminDashboard() {
     }
   }
 
-  // Authentication loading screen.
   if (loading) {
     return (
       <View style={styles.center}>
@@ -169,7 +168,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // Authentication or profile error.
   if (profileError) {
     return (
       <View style={styles.center}>
@@ -179,7 +177,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // Block unauthorized users.
   if (!user || !isAdmin) {
     return (
       <View style={styles.center}>
@@ -207,10 +204,10 @@ export default function AdminDashboard() {
 
         <Pressable
           style={styles.refreshButton}
+          disabled={fetching || processing}
           onPress={() => {
             void loadPendingAccounts();
           }}
-          disabled={fetching || processing}
         >
           <Text style={styles.buttonText}>
             {fetching ? "Refreshing..." : "Refresh Applications"}
@@ -262,31 +259,29 @@ export default function AdminDashboard() {
                     value={reason}
                     onChangeText={setReason}
                     multiline
-                    editable={!processing}
+                    editable={!processing && !confirmation}
                   />
 
                   <View style={styles.actionRow}>
                     <Pressable
                       style={[styles.actionButton, styles.approveButton]}
-                      disabled={processing}
-                      onPress={() => confirmReview(account.user_id, "active")}
+                      disabled={processing || confirmation !== null}
+                      onPress={() => prepareReview(account, "active")}
                     >
                       <Text style={styles.buttonText}>Approve</Text>
                     </Pressable>
 
                     <Pressable
                       style={[styles.actionButton, styles.suspendButton]}
-                      disabled={processing}
-                      onPress={() =>
-                        confirmReview(account.user_id, "suspended")
-                      }
+                      disabled={processing || confirmation !== null}
+                      onPress={() => prepareReview(account, "suspended")}
                     >
                       <Text style={styles.buttonText}>Suspend</Text>
                     </Pressable>
                   </View>
 
                   <Pressable
-                    disabled={processing}
+                    disabled={processing || confirmation !== null}
                     onPress={() => {
                       setSelectedUser(null);
                       setReason("");
@@ -299,7 +294,7 @@ export default function AdminDashboard() {
               ) : (
                 <Pressable
                   style={styles.reviewButton}
-                  disabled={processing}
+                  disabled={processing || confirmation !== null}
                   onPress={() => {
                     setSelectedUser(account.user_id);
                     setReason("");
@@ -315,12 +310,65 @@ export default function AdminDashboard() {
         })}
       </View>
 
+      {confirmation !== null && (
+        <View style={styles.confirmationPanel}>
+          <Text style={styles.confirmationTitle}>Confirm Account Decision</Text>
+
+          <Text>Applicant: {confirmation.accountName}</Text>
+
+          <Text>
+            Action:{" "}
+            {confirmation.status === "active"
+              ? "Approve account"
+              : "Suspend account"}
+          </Text>
+
+          <Text style={styles.reviewLabel}>Review reason</Text>
+
+          <Text style={styles.confirmationReason}>{confirmation.reason}</Text>
+
+          <Text style={styles.warning}>
+            Confirming this decision will update the account status and create
+            an audit record.
+          </Text>
+
+          <View style={styles.actionRow}>
+            <Pressable
+              style={[styles.actionButton, styles.cancelButton]}
+              disabled={processing}
+              onPress={() => setConfirmation(null)}
+            >
+              <Text style={styles.buttonText}>Cancel</Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.actionButton,
+                confirmation.status === "active"
+                  ? styles.approveButton
+                  : styles.suspendButton,
+              ]}
+              disabled={processing}
+              onPress={() => {
+                void submitReview();
+              }}
+            >
+              <Text style={styles.buttonText}>
+                {processing ? "Processing..." : "Confirm Decision"}
+              </Text>
+            </Pressable>
+          </View>
+
+          {processing && <ActivityIndicator size="small" />}
+        </View>
+      )}
+
       <Pressable
         style={styles.signOutButton}
+        disabled={processing}
         onPress={() => {
           void handleSignOut();
         }}
-        disabled={processing}
       >
         <Text style={styles.buttonText}>Sign Out</Text>
       </Pressable>
@@ -449,10 +497,38 @@ const styles = StyleSheet.create({
     backgroundColor: "#B42318",
   },
 
+  cancelButton: {
+    backgroundColor: "#667085",
+  },
+
   cancelText: {
     color: "#475467",
     textAlign: "center",
     padding: 8,
+  },
+
+  confirmationPanel: {
+    backgroundColor: "#FFF7ED",
+    borderWidth: 1,
+    borderColor: "#FDBA74",
+    borderRadius: 12,
+    padding: 20,
+    gap: 14,
+    marginTop: 16,
+  },
+
+  confirmationTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#9A3412",
+  },
+
+  confirmationReason: {
+    backgroundColor: "#FFFFFF",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#FED7AA",
   },
 
   signOutButton: {
